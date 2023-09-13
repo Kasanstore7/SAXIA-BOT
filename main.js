@@ -1,34 +1,17 @@
-/*
-  * Powered By Team Saxia
-  * Don't delete this !!!
-*/
-
-(async() => { 
+(async () => {
 require('./config')
-const { default:
-  useSingleFileAuthState,
-  useMultiFileAuthState,
-  makeInMemoryStore,
-  makeWALegacySocket,
-  DisconnectReason
-} = require('@adiwajshing/baileys')
+const { useMultiFileAuthState, DisconnectReason, generateForwardMessageContent, prepareWAMessageMedia, generateWAMessageFromContent, generateMessageID, downloadContentFromMessage, makeInMemoryStore, jidDecode, proto } = require("@adiwajshing/baileys")
+const pino = require('pino')
 const WebSocket = require('ws')
 const path = require('path')
-const pino = require('pino')
-//const { prettifier } = require('pino-pretty')
 const fs = require('fs')
 const yargs = require('yargs/yargs')
 const cp = require('child_process')
-let { promisify } = require('util')
-let exec = promisify(cp.exec).bind(cp)
 const _ = require('lodash')
 const syntaxerror = require('syntax-error')
-// const P = require('pino')
+const P = require('pino')
 const os = require('os')
-const moment = require("moment-timezone")
-const time = moment.tz('Asia/Jakarta').format("HH:mm:ss")
-const chalk = require('chalk')
-const { color } = require('./lib/color')
+
 let simple = require('./lib/simple')
 var low
 try {
@@ -40,184 +23,150 @@ const { Low, JSONFile } = low
 const mongoDB = require('./lib/mongoDB')
 
 
-API = (name, path = '/', query = {}, apikeyqueryname) => (name in APIs ? APIs[name] : name) + path + (query || apikeyqueryname ? '?' + new URLSearchParams(Object.entries({ ...query, ...(apikeyqueryname ? { [apikeyqueryname]: APIKeys[name in APIs ? APIs[name] : name] } : {}) })) : '')
+global.API = (name, path = '/', query = {}, apikeyqueryname) => (name in global.APIs ? global.APIs[name] : name) + path + (query || apikeyqueryname ? '?' + new URLSearchParams(Object.entries({ ...query, ...(apikeyqueryname ? { [apikeyqueryname]: global.APIKeys[name in global.APIs ? global.APIs[name] : name] } : {}) })) : '')
 // global.Fn = function functionCallBack(fn, ...args) { return fn.call(global.conn, ...args) }
-timestamp = {
+global.timestamp = {
   start: new Date
 }
 
 const PORT = process.env.PORT || 3000
 
-opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse())
-prefix = new RegExp('^[' + (opts['prefix'] || 'â€ŽxzXZ/i!#$%+Â£Â¢â‚¬Â¥^Â°=Â¶âˆ†Ã—Ã·Ï€âˆšâœ“Â©Â®:;?&.\\-').replace(/[|\\{}()[\]^$+*?.\-\^]/g, '\\$&') + ']')
+global.opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse())
+// console.log({ opts })
+global.prefix = new RegExp('^[' + (opts['prefix'] || '‎xzXZ/i!#$%+£¢€¥^°=¶∆×÷π√✓©®:;?&.\\-').replace(/[|\\{}()[\]^$+*?.\-\^]/g, '\\$&') + ']')
 
-db = new Low(
+global.db = new Low(
   /https?:\/\//.test(opts['db'] || '') ?
-    new cloudDBAdapter(opts['db']) : /mongodb/i.test(opts['db']) ?
+    new cloudDBAdapter(opts['db']) : /mongodb/.test(opts['db']) ?
       new mongoDB(opts['db']) :
       new JSONFile(`${opts._[0] ? opts._[0] + '_' : ''}database.json`)
 )
-
-//db = new Low(new mongoDB('mongodb+srv://Aine99:kuku4040@cluster0.3o49pmt.mongodb.net/?retryWrites=true&w=majority'))
-
-DATABASE = db // Backwards Compatibility
-loadDatabase = async function loadDatabase() {
-  if (db.READ) return new Promise((resolve) => setInterval(function () { (!db.READ ? (clearInterval(this), resolve(db.data == null ? loadDatabase() : db.data)) : null) }, 1 * 1000))
-  if (db.data !== null) return
-  db.READ = true
-  await db.read()
-  db.READ = false
-  db.data = {
+global.DATABASE = global.db // Backwards Compatibility
+global.loadDatabase = async function loadDatabase() {
+  if (global.db.READ) return new Promise((resolve) => setInterval(function () { (!global.db.READ ? (clearInterval(this), resolve(global.db.data == null ? global.loadDatabase() : global.db.data)) : null) }, 1 * 1000))
+  if (global.db.data !== null) return
+  global.db.READ = true
+  await global.db.read()
+  global.db.READ = false
+  global.db.data = {
     users: {},
     chats: {},
     stats: {},
     msgs: {},
     sticker: {},
-    settings: {},
-    respon : {},
-    ...(db.data || {})
+    ...(global.db.data || {})
   }
-  db.chain = _.chain(db.data)
+  global.db.chain = _.chain(global.db.data)
 }
 loadDatabase()
 
-
-const authFolder = `${opts._[0] || 'sessions'}`
-const { state, saveCreds } = await useMultiFileAuthState(authFolder)
-
-//const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
-
-const logger = pino({
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      levelFirst: true, 
-      ignore: 'hostname', 
-      translateTime: true
-    }
-  }
-}).child({ class: 'baileys'})
+    
+    
+// if (opts['cluster']) {
+//   require('./lib/cluster').Cluster()
+// }
+const authFile = `${opts._[0] || 'sessions'}`
+global.isInit = !fs.existsSync(authFile)
+const { state, saveState, saveCreds } = await useMultiFileAuthState(authFile)
 
 const connectionOptions = {
-  version: [2, 2228, 8],
   printQRInTerminal: true,
   syncFullHistory: true,
+  markOnlineOnConnect: true,
+  connectTimeoutMs: 60_000, 
+  defaultQueryTimeoutMs: 0,
+  keepAliveIntervalMs: 10000,
+  generateHighQualityLinkPreview: true, 
+  patchMessageBeforeSending: (message) => {
+    const requiresPatch = !!(
+        message.buttonsMessage 
+        || message.templateMessage
+        || message.listMessage
+    );
+    if (requiresPatch) {
+        message = {
+            viewOnceMessage: {
+                message: {
+                    messageContextInfo: {
+                        deviceListMetadataVersion: 2,
+                        deviceListMetadata: {},
+                    },
+                    ...message,
+                },
+            },
+        };
+    }
+
+    return message;
+},
   auth: state,
-  // logger: pino({ prettyPrint: { levelFirst: true, ignore: 'hostname', translateTime: true },  prettifier: require('pino-pretty') }),
-  logger: pino({ level: 'silent' })
-  // logger: P({ level: 'trace' })
+  browser: ['BOTCAHX','Safari',''],
+  logger: pino({ level: 'silent'}),
+  version: [2, 2325, 3]
 }
 
-conn = simple.makeWASocket(connectionOptions)
-conn.isInit = false
-// const store = makeInMemoryStore({ })
-// store.readFromFile('./baileys_store.json')
-// setInterval(() => { store.writeToFile('./baileys_store.json') }, 10_000) //nyalakan kalau mau di simpan database store nya dengan resiko ram cepat penuh. 
-// store.bind(conn.ev)
-// global.store = store
-// console.log(store)
-/*
+global.conn = simple.makeWASocket(connectionOptions)
+
 if (!opts['test']) {
-  setInterval(async () => {
-    if (db.data) await db.write()
-    if (opts['autocleartmp']) try {
-      clearTmp()
-    } catch (e) { console.error(e) }
-  }, 60 * 1000)
-}*/
-if (!opts['test']) {
-  if (db) setInterval(async () => {
-    if (global.db.data) await db.write()
-    if (opts['autocleartmp'] && (support || {}).find) (tmp = [os.tmpdir(), 'tmp'], tmp.forEach(filename => cp.spawn('find', [filename, '-amin', '3', '-type', 'f', '-delete'])))
+  if (global.db) setInterval(async () => {
+    if (global.db.data) await global.db.write()
+    if (!opts['tmp'] && (global.support || {}).find) (tmp = [os.tmpdir(), 'tmp'], tmp.forEach(filename => cp.spawn('find', [filename, '-amin', '3', '-type', 'f', '-delete'])))
   }, 30 * 1000)
 }
-if (opts['server']) require('./server')(conn, PORT)
-
-function clearTmp() {
-  const tmp = [os.tmpdir(), path.join(__dirname, './tmp')]
-  const filename = []
-  tmp.forEach(dirname => fs.readdirSync(dirname).forEach(file => filename.push(path.join(dirname, file))))
-  filename.map(file => (
-    stats = fs.statSync(file),
-    stats.isFile() && (Date.now() - stats.mtimeMs >= 1000 * 60 * 3) ?
-      fs.unlinkSync(file) :
-      null))
-}
-
-setInterval(async () => {
-    await exec("rm -rf ./tmp/*")
-  }, 60 * 60 * 1000)
-
-setInterval(async () => {
-    const q = { "key": { "remoteJid": "status@broadcast", "participant":"0@s.whatsapp.net", "fromMe": false, "id": "" },
-	"message": { "conversation": "Berhasil mencadangkan database.json" }}
-    let sesi = await fs.readFileSync('./database.json')
-    return await conn.sendMessage('4915147222100@s.whatsapp.net', { document: sesi, mimetype: 'application/json', fileName: 'database.json' }, { quoted: q })
-  }, 60 * 60 * 1000)
 
 async function connectionUpdate(update) {
-  const { connection, lastDisconnect, isNewLogin } = update
-   if (connection == 'connecting') console.log(chalk.yellowBright('Tunggu Sebentar...'))
-   if (connection == 'open') {
-      console.log(chalk.green('Tersambung'))
-      conn.sendMessage(`120363023958940214@g.us`, {text: '>Bot Online Ini Hanya Notifikasi Otomatis<' }) // Connection Update
-  }
-  if (connection == 'close') console.log(chalk.red('Koneksi Terputus!'))
-  if (isNewLogin) conn.isInit = true
+  const { connection, lastDisconnect } = update
+  global.timestamp.connect = new Date
   if (lastDisconnect && lastDisconnect.error && lastDisconnect.error.output && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut && conn.ws.readyState !== WebSocket.CONNECTING) {
-    console.log(reloadHandler(true))
-    timestamp.connect = new Date
+    console.log(global.reloadHandler(true))
   }
-  if (db.data == null) await loadDatabase()
-  console.log(JSON.stringify(update, null, 4))
- //Apasih Bang 
+  if (global.db.data == null) await loadDatabase()
+   if (update.receivedPendingNotifications) conn.sendMessage(`6287764694844@s.whatsapp.net`, { text: 'Bot connection update 😠️' }, {quoted: null })
 }
+
 
 process.on('uncaughtException', console.error)
 // let strQuot = /(["'])(?:(?=(\\?))\2.)*?\1/
 
-// const imports = (path) => {
-//   path = require.resolve(path)
-//   let modules, retry = 0
-//   do {
-//     if (path in require.cache) delete require.cache[path]
-//     modules = require(path)
-//     retry++
-//   } while ((!modules || (Array.isArray(modules) || modules instanceof String) ? !(modules || []).length : typeof modules == 'object' && !Buffer.isBuffer(modules) ? !(Object.keys(modules || {})).length : true) && retry <= 10)
-//   return modules
-// }
-
-let isInit = true, handler = require('./handler')
-reloadHandler = function (restatConn) {
-  let Handler = require('./handler')
-  if (Object.keys(Handler || {}).length) handler = Handler
+const imports = (path) => {
+  path = require.resolve(path)
+  let modules, retry = 0
+  do {
+    if (path in require.cache) delete require.cache[path]
+    modules = require(path)
+    retry++
+  } while ((!modules || (Array.isArray(modules) || modules instanceof String) ? !(modules || []).length : typeof modules == 'object' && !Buffer.isBuffer(modules) ? !(Object.keys(modules || {})).length : true) && retry <= 10)
+  return modules
+}
+let isInit = true
+global.reloadHandler = function (restatConn) {
+  let handler = imports('./handler')
   if (restatConn) {
-    try { conn.ws.close() } catch { }
-    conn = {
-      ...conn, ...simple.makeWASocket(connectionOptions)
+    try { global.conn.ws.close() } catch { }
+    global.conn = {
+      ...global.conn, ...simple.makeWASocket(connectionOptions)
     }
   }
   if (!isInit) {
     conn.ev.off('messages.upsert', conn.handler)
-    conn.ev.off('group-participants.update', conn.onParticipantsUpdate)
+    conn.ev.off('group-participants.update', conn.participantsUpdate)
     conn.ev.off('message.delete', conn.onDelete)
     conn.ev.off('connection.update', conn.connectionUpdate)
     conn.ev.off('creds.update', conn.credsUpdate)
   }
 
-  conn.welcome = 'Selamat datang @user 👋' 
-  conn.bye = 'Selamat tinggal @user 👋'
-  conn.spromote = '@user sekarang admin!'
-  conn.sdemote = '@user sekarang bukan admin!'
+  conn.welcome = 'Welcome @user 👋 In Groups @subject Dont Forget To Obey The Existing Rules'
+  conn.bye = 'Goodbye @user 👋'
+  conn.promote = '@user sekarang admin!'
+  conn.demote = '@user sekarang bukan admin!'
   conn.handler = handler.handler.bind(conn)
-  conn.onParticipantsUpdate = handler.participantsUpdate.bind(conn)
+  conn.participantsUpdate = handler.participantsUpdate.bind(conn)
   conn.onDelete = handler.delete.bind(conn)
   conn.connectionUpdate = connectionUpdate.bind(conn)
   conn.credsUpdate = saveCreds.bind(conn)
 
   conn.ev.on('messages.upsert', conn.handler)
-  conn.ev.on('group-participants.update', conn.onParticipantsUpdate)
+  conn.ev.on('group-participants.update', conn.participantsUpdate)
   conn.ev.on('message.delete', conn.onDelete)
   conn.ev.on('connection.update', conn.connectionUpdate)
   conn.ev.on('creds.update', conn.credsUpdate)
@@ -227,17 +176,17 @@ reloadHandler = function (restatConn) {
 
 let pluginFolder = path.join(__dirname, 'plugins')
 let pluginFilter = filename => /\.js$/.test(filename)
-plugins = {}
+global.plugins = {}
 for (let filename of fs.readdirSync(pluginFolder).filter(pluginFilter)) {
   try {
-    plugins[filename] = require(path.join(pluginFolder, filename))
+    global.plugins[filename] = require(path.join(pluginFolder, filename))
   } catch (e) {
     conn.logger.error(e)
-    delete plugins[filename]
+    delete global.plugins[filename]
   }
 }
-console.log(Object.keys(plugins))
-reload = (_ev, filename) => {
+console.log(Object.keys(global.plugins))
+global.reload = (_ev, filename) => {
   if (pluginFilter(filename)) {
     let dir = path.join(pluginFolder, filename)
     if (dir in require.cache) {
@@ -245,23 +194,23 @@ reload = (_ev, filename) => {
       if (fs.existsSync(dir)) conn.logger.info(`re - require plugin '${filename}'`)
       else {
         conn.logger.warn(`deleted plugin '${filename}'`)
-        return delete plugins[filename]
+        return delete global.plugins[filename]
       }
     } else conn.logger.info(`requiring new plugin '${filename}'`)
     let err = syntaxerror(fs.readFileSync(dir), filename)
     if (err) conn.logger.error(`syntax error while loading '${filename}'\n${err}`)
     else try {
-      plugins[filename] = require(dir)
+      global.plugins[filename] = require(dir)
     } catch (e) {
-      conn.logger.error(`error require plugin '${filename}\n${e}'`)
+      conn.logger.error(e)
     } finally {
-      plugins = Object.fromEntries(Object.entries(plugins).sort(([a], [b]) => a.localeCompare(b)))
+      global.plugins = Object.fromEntries(Object.entries(global.plugins).sort(([a], [b]) => a.localeCompare(b)))
     }
   }
 }
-Object.freeze(reload)
-fs.watch(path.join(__dirname, 'plugins'), reload)
-reloadHandler()
+Object.freeze(global.reload)
+fs.watch(path.join(__dirname, 'plugins'), global.reload)
+global.reloadHandler()
 
 // Quick Test
 async function _quickTest() {
@@ -287,7 +236,7 @@ async function _quickTest() {
   }))
   let [ffmpeg, ffprobe, ffmpegWebp, convert, magick, gm, find] = test
   console.log(test)
-  let s = support = {
+  let s = global.support = {
     ffmpeg,
     ffprobe,
     ffmpegWebp,
@@ -297,7 +246,7 @@ async function _quickTest() {
     find
   }
   // require('./lib/sticker').support = s
-  Object.freeze(support)
+  Object.freeze(global.support)
 
   if (!s.ffmpeg) conn.logger.warn('Please install ffmpeg for sending videos (pkg install ffmpeg)')
   if (s.ffmpeg && !s.ffmpegWebp) conn.logger.warn('Stickers may not animated without libwebp on ffmpeg (--enable-ibwebp while compiling ffmpeg)')
@@ -306,7 +255,5 @@ async function _quickTest() {
 
 _quickTest()
   .then(() => conn.logger.info('Quick Test Done'))
-  .catch(console.error)
-  
-console.log(color(time,"white"),color("Connecting...","aqua"))
+  .catch("done")
 })()
