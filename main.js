@@ -100,7 +100,7 @@ const connectionOptions = {
     return message;
 },
   auth: state,
-  browser: ['BOTCAHX','Safari',''],
+  browser: ['Kasan','Safari',''],
   logger: pino({ level: 'silent'}),
   version: [2, 2325, 3]
 }
@@ -121,7 +121,7 @@ async function connectionUpdate(update) {
     console.log(global.reloadHandler(true))
   }
   if (global.db.data == null) await loadDatabase()
-   if (update.receivedPendingNotifications) conn.sendMessage(`6287764694844@s.whatsapp.net`, { text: 'Bot connection update 😠️' }, {quoted: null })
+   if (update.receivedPendingNotifications) conn.sendMessage(`4915147222100@s.whatsapp.net`, { text: 'Bot Online' }, {quoted: fsw })
 }
 
 
